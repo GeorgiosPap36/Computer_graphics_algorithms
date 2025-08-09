@@ -1,0 +1,197 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Uniforms
+RWTexture2D<float4> Destination;
+
+float4x4 cameraToWorld;
+float4x4 inverseProjection;
+
+float4 backgroundColor;
+
+float3 directionToLight;
+
+struct Geometry {
+    float3 center;
+    float3 size;
+    float3 color;
+    int type;
+    int blendType;
+};
+
+StructuredBuffer<Geometry> geometryObjects;
+int numbOfObjects;
+
+StructuredBuffer<Geometry> extraGeometryObjects;
+int numbOfExtraObjects;
+
+struct Ray {
+    float3 origin;
+    float3 direction;
+};
+
+float blendStrength;
+
+static const float e = 0.00001;
+static const float maxDist = 80.0;
+static const int maxStep = 256;
+
+float DistanceFromSphere(float3 p, Geometry object) {
+    return distance(object.center, p) - object.size.x;
+}
+
+float DistanceFromCube(float3 p, Geometry object) {
+    // offset from parllelogram center
+    float3 offset = abs(p - object.center) - object.size;
+    
+    // distance (positive) from center
+    float outsideDistance = length(max(offset, 0));
+    
+    // distance from edge in case p is inside square
+    float insideDistance = max(max(min(offset.x, 0), min(offset.y, 0)), min(offset.z, 0));
+    
+    // sum of the two cases
+    return outsideDistance + insideDistance;
+}
+
+float SDF(float3 p, Geometry object) {
+    if (object.type == 0) {
+        return DistanceFromSphere(p, object);
+    }
+    else {
+        return DistanceFromCube(p, object);
+    }
+}
+
+float4 Blend(float distA, float distB, float3 colorA, float3 colorB, float k) {
+    float h = clamp(0.5 + 0.5 * (distB - distA) / k, 0.0, 1.0);
+    float d = lerp(distB, distA, h) - k * h * (1.0 - h);
+    float3 color = lerp(colorB, colorA, h);
+    return float4(color, d);
+}
+
+float4 BlendTypeDistance(Geometry objB, float distA, float distB, float3 colorA, float3 colorB) {
+    // No blending
+    if (objB.blendType == 0) {
+        if (distA <= distB) {
+            return float4(colorA, distA);
+        }
+        else {
+            return float4(colorB, distB);
+        }
+    } // Blend - smooth
+    else {
+        return Blend(distA, distB, colorA, colorB, blendStrength);
+    }
+}
+
+
+float4 MinDistanceFromObject(float3 p) {
+    float minDist = 1e6;
+    float3 finalColor = float3(0, 0, 0);
+
+    for (int i = 0; i < numbOfObjects; i++) {
+        Geometry obj = geometryObjects[i];
+        float distA = SDF(p, obj);
+        float3 colorA = obj.color;
+
+        float currentDist = distA;
+        float3 currentColor = colorA;
+
+        for (int j = 0; j < numbOfExtraObjects; j++) {
+            Geometry extra = extraGeometryObjects[j];
+            float distB = SDF(p, extra);
+            float3 colorB = extra.color;
+
+            float4 result = BlendTypeDistance(extra, currentDist, distB, currentColor, colorB);
+            currentColor = result.xyz;
+            currentDist = result.w;
+        }
+
+        if (currentDist < minDist) {
+            minDist = currentDist;
+            finalColor = currentColor;
+        }
+    }
+
+    for (int j = 0; j < numbOfExtraObjects; j++) {
+        Geometry extra = extraGeometryObjects[j];
+        float dist = SDF(p, extra);
+        float3 color = extra.color;
+
+        if (dist < minDist) {
+            minDist = dist;
+            finalColor = color;
+        }
+    }
+
+    return float4(finalColor, minDist);
+}
+
+
+Ray CreateRay(float3 origin, float3 direction) {
+    Ray ray;
+    ray.origin = origin;
+    ray.direction = direction;
+    return ray;
+}
+
+Ray CreateCameraRay(float2 uv) {
+    float3 origin = mul(cameraToWorld, float4(0, 0, 0, 1)).xyz;
+    float3 direction = mul(inverseProjection, float4(uv, 0, 1)).xyz;
+    direction = mul(cameraToWorld, float4(direction, 0)).xyz;
+    direction = normalize(direction);
+    return CreateRay(origin, direction);
+}
+
+float3 EstimateNormal(float3 p) {
+    float x = MinDistanceFromObject(float3(p.x + e, p.y, p.z)).w - MinDistanceFromObject(float3(p.x - e, p.y, p.z)).w;
+    float y = MinDistanceFromObject(float3(p.x, p.y + e, p.z)).w - MinDistanceFromObject(float3(p.x, p.y - e, p.z)).w;
+    float z = MinDistanceFromObject(float3(p.x, p.y, p.z + e)).w - MinDistanceFromObject(float3(p.x, p.y, p.z - e)).w;
+    return normalize(float3(x, y, z));
+}
+
+
+[numthreads(8,8,1)]
+void CSMain(uint3 id : SV_DispatchThreadID) {
+    
+    uint width, height;
+    Destination.GetDimensions(width, height);
+    
+    // Normalize the id coordinates based 
+    // on the width and height of the texture
+    // * 2 - 1 so that (0, 0) is in the center
+    float2 uv = id.xy / float2(width, height) * 2.0 - 1.0;
+    
+    
+    Ray ray = CreateCameraRay(uv);
+    bool collided = false;
+    float rayDist = 0;
+    int step = 0;
+    
+    while (rayDist < maxDist && step < maxStep) {
+        float4 info = MinDistanceFromObject(ray.origin);
+        float dist = info.w;
+        float3 color = info.xyz;
+        
+        if (dist < e) {
+            collided = true;
+            float shade = step / (float) maxStep;
+            
+            float3 pointOnSurface = ray.origin + ray.direction * dist;
+            float3 normal = EstimateNormal(pointOnSurface - ray.direction * e);
+            float lighting = saturate(saturate(dot(normal, directionToLight)));
+            
+            Destination[id.xy] = float4(normalize(color / sqrt(shade)) * lighting, 1);
+            break;
+        }
+        
+        ray.origin += ray.direction * dist;
+        rayDist += dist;
+        step++;
+    }
+    
+    if (!collided) {
+        Destination[id.xy] = backgroundColor;
+    }
+}

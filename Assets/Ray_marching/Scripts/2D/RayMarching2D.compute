@@ -1,0 +1,91 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+
+// Uniforms?
+RWTexture2D<float4> Source;
+RWTexture2D<float4> Destination;
+
+float4 color;
+
+struct Circle {
+    float2 center;
+    float radius;
+};
+
+StructuredBuffer<Circle> circles;
+int numbOfCircles;
+
+struct Square {
+    float2 center;
+    float2 size;
+};
+
+StructuredBuffer<Square> squares;
+int numbOfSquares;
+
+
+float DistanceFromCircle(float2 p, Circle circle) {
+    return distance(circle.center, p) - circle.radius;
+}
+
+float DistanceFromSquare(float2 p, Square square) {
+    // offset from parllelogram center
+    float2 offset = abs(p - square.center) - square.size;
+    
+    // distance (positive) from center
+    float outsideDistance = length(max(offset, 0));
+    
+    // distance from edge in case p is inside square
+    float insideDistance = max(min(offset.x, 0), min(offset.y, 0));
+    
+    // sum of the two cases
+    return outsideDistance + insideDistance;
+}
+
+
+
+
+
+[numthreads(8,8,1)]
+void CSMain(uint3 id : SV_DispatchThreadID) {
+    
+    uint width, height;
+    Destination.GetDimensions(width, height);
+    // Copy the source texture onto the Destination texture
+    Destination[id.xy] = Source[id.xy]; 
+    
+    // Normalize the id coordinates based 
+    // on the width and height of the texture
+    // * 2 - 1 so that (0, 0) is in the center
+    float2 uv = id.xy / float2(width, height) * 2 - 1; 
+    
+    // Fix the stretch by multiplying the x coordinate
+    // with the aspect ration
+    float aspect = (float) width / height;
+    uv.x *= aspect;
+    
+    Destination[id.xy] = color;
+    
+    for (int i = 0; i < numbOfCircles; i++) {
+        float d = DistanceFromCircle(uv.xy, circles[i]);
+        
+        if (abs(d) <= 0.005) {
+            Destination[id.xy] = float4(1, 1, 1, 1);
+        }
+        else if (d < 0) {
+            Destination[id.xy] = float4(0.1, 0.1, 0.1, 1);
+        }
+    }
+    
+    for (int j = 0; j < numbOfSquares; j++) {
+        float d = DistanceFromSquare(uv.xy, squares[j]);
+
+        if (abs(d) <= 0.005) { 
+            Destination[id.xy] = float4(1, 1, 1, 1);
+        }
+        else if (d < 0) {
+            Destination[id.xy] = float4(0.1, 0.1, 0.1, 1);
+        }
+    }
+}
