@@ -1,0 +1,200 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Uniforms
+RWTexture2D<float4> Result;
+RWTexture3D<float4> Noise;
+
+float4 backgroundColor;
+int gridWidth, gridHeight;
+
+int time;
+
+static const float4 _colors[17] = { 
+    float4(0.2, 0.0, 0.2, 1.0),
+    float4(0.4, 0.0, 0.2, 1.0),
+    float4(0.0, 0.4, 0.2, 1.0),
+    float4(0.0, 0.2, 0.4, 1.0),
+    float4(0.4, 0.0, 0.4, 1.0),
+    float4(0.6, 0.0, 0.4, 1.0),
+    float4(0.0, 0.4, 0.6, 1.0),
+    float4(0.4, 0.6, 0.0, 1.0),
+    float4(0.4, 0.6, 0.0, 1.0),
+    float4(0.0, 0.4, 0.6, 1.0),
+    float4(0.6, 0.0, 0.4, 1.0),
+    float4(0.4, 0.0, 0.4, 1.0),
+    float4(0.0, 0.2, 0.4, 1.0),
+    float4(0.0, 0.4, 0.2, 1.0),
+    float4(0.4, 0.0, 0.2, 1.0),
+    float4(0.2, 0.0, 0.2, 1.0),
+    float4(1.0, 0.0, 0.0, 1.0)
+};
+
+static const float4 _lineSegments[32] =
+{
+    float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0), // 0
+    float4(0.0, 0.0, 0.0, 1.0), float4(0.0, 0.0, 1.0, 0.0), // 1
+    float4(0.0, 0.0, 0.0, 1.0), float4(0.0, 1.0, 1.0, 1.0), // 2
+    float4(0.0, 0.0, 1.0, 0.0), float4(0.0, 1.0, 1.0, 1.0), // 3
+    float4(0.0, 1.0, 1.0, 1.0), float4(1.0, 1.0, 1.0, 0.0), // 4
+    float4(0.0, 0.0, 0.0, 1.0), float4(0.0, 1.0, 1.0, 1.0), // 5
+    float4(0.0, 0.0, 0.0, 1.0), float4(1.0, 0.0, 1.0, 1.0), // 6
+    float4(0.0, 0.0, 1.0, 0.0), float4(1.0, 0.0, 1.0, 1.0), // 7
+    float4(0.0, 0.0, 1.0, 0.0), float4(1.0, 0.0, 1.0, 1.0), // 8
+    float4(0.0, 0.0, 0.0, 1.0), float4(1.0, 0.0, 1.0, 1.0), // 9
+    float4(0.0, 0.0, 0.0, 1.0), float4(0.0, 0.0, 1.0, 0.0), // 10
+    float4(0.0, 1.0, 1.0, 1.0), float4(1.0, 1.0, 1.0, 0.0), // 11
+    float4(0.0, 0.0, 1.0, 0.0), float4(0.0, 1.0, 1.0, 1.0), // 12
+    float4(0.0, 0.0, 0.0, 1.0), float4(0.0, 1.0, 1.0, 1.0), // 13
+    float4(0.0, 0.0, 0.0, 1.0), float4(0.0, 0.0, 1.0, 0.0), // 14 
+    float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0) // 15
+};
+
+static const float4 _lineSegments2[32] =
+{
+    float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0), // 0
+    float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0), // 1
+    float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0), // 2
+    float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0), // 3
+    float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0), // 4
+    float4(0.0, 0.0, 1.0, 0.0), float4(1.0, 0.0, 1.0, 1.0), // 5
+    float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0), // 6
+    float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0), // 7
+    float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0), // 8
+    float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0), // 9
+    float4(1.0, 0.0, 1.0, 1.0), float4(0.0, 1.0, 1.0, 1.0), // 10
+    float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0), // 11
+    float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0), // 12
+    float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0), // 13
+    float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0), // 14 
+    float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0) // 15
+};
+
+
+
+float4 DrawGrid(float2 id, float2 cellSize, float4 c) {
+    float4 color = c;
+    
+    int2 cellId = id.xy / cellSize;
+    float2 cellColor = (cellId / float2(gridWidth, gridHeight));
+    
+    color = float4(cellColor, 0.0, 1.0);
+    
+    return color;
+}
+
+float4 DrawCircleAroundGridVertice(float2 id, float2 cellSize, float4 c, int zSlice) {
+    float4 color = c;
+    
+    int2 nearestVertexId = round(id.xy / cellSize);
+    
+    if (nearestVertexId.x < 0 || nearestVertexId.y < 0 || nearestVertexId.x > gridWidth || nearestVertexId.y > gridHeight) {
+        return c;
+    }
+    
+    float2 nearestVertex = (float2) nearestVertexId * cellSize;
+    float radius = min(cellSize.x, cellSize.y) / 4;
+    
+    if (length(id.xy - nearestVertex) < radius) {
+        // color = float4(0.0, 1.0, 0.0, 1.0);
+        // float val = gridValues[vertexId.y * gridWidth + vertexId.x];
+        
+        nearestVertexId = clamp(nearestVertexId, int2(0, 0), int2(gridWidth, gridHeight));
+        
+        float val = Noise[int3(nearestVertexId, zSlice)].r;
+        color = (val >= 0.5) ? float4(1.0, 1.0, 1.0, 1.0) : float4(0.0, 0.0, 0.0, 0.0);
+
+    }
+    
+    return color;
+}
+
+int SquareNumber(int2 bottomLeftVertexId, int zSlice) {
+    
+    int val0 = (Noise[int3(bottomLeftVertexId, zSlice) + int3(0, 0, 0)].r > 0.5) ? 1 : 0;
+    int val1 = (Noise[int3(bottomLeftVertexId, zSlice) + int3(0, 1, 0)].r > 0.5) ? 1 : 0;
+    int val2 = (Noise[int3(bottomLeftVertexId, zSlice) + int3(1, 1, 0)].r > 0.5) ? 1 : 0;
+    int val3 = (Noise[int3(bottomLeftVertexId, zSlice) + int3(1, 0, 0)].r > 0.5) ? 1 : 0;
+    
+    int squareCase = (val0 << 0) | (val1 << 1) | (val2 << 2) | (val3 << 3);
+    return squareCase;
+}
+
+float2 CalcualteLineEdgeOffset(float4 betweenVertexIndexes) {
+    float2 index1 = betweenVertexIndexes.xy;
+    float2 index2 = betweenVertexIndexes.zw;
+    
+    float2 offset = float2(0, 0);
+    
+    if (index1.x == index2.x) {
+        offset.x = index1.x;
+    }
+    else {
+        offset.x = (index1.x + index2.x) / 2;
+    }
+    
+    if (index1.y == index2.y) {
+        offset.y = index1.y;
+    }
+    else {
+        offset.y = (index1.y + index2.y) / 2;
+    }
+   
+    return offset;
+}
+
+bool IsOnLineSegment(float2 p, float2 a, float2 b, float2 cellSize) {
+    if (all(a == b)) {
+        return false;
+    }
+    
+    float2 ab = b - a;
+    float2 ap = p - a;
+
+    float abLen2 = dot(ab, ab);
+    float t = clamp(dot(ap, ab) / abLen2, 0.0, 1.0);
+    float2 closest = a + t * ab;
+
+    float lineThickness = 0.5 + 0.01 * cellSize;
+    
+    float dist = length(p - closest);
+    return dist <= lineThickness;
+}
+    
+float4 DrawIfOnLineSegment(float2 id, float2 cellSize, float4 c, int zSlice) {
+    int2 vertexId = (int2) floor(id / cellSize);
+    if (vertexId.x < 0 || vertexId.y < 0 || vertexId.x > gridWidth - 1 || vertexId.y > gridHeight - 1) {
+        return c;
+    }
+
+    int squareCase = SquareNumber(vertexId, zSlice);
+
+    float2 a1 = (vertexId + CalcualteLineEdgeOffset(_lineSegments[2 * squareCase])) * cellSize;
+    float2 b1 = (vertexId + CalcualteLineEdgeOffset(_lineSegments[2 * squareCase + 1])) * cellSize;
+    float2 a2 = (vertexId + CalcualteLineEdgeOffset(_lineSegments2[2 * squareCase])) * cellSize;
+    float2 b2 = (vertexId + CalcualteLineEdgeOffset(_lineSegments2[2 * squareCase + 1])) * cellSize;
+        
+    if (IsOnLineSegment(id.xy, a1, b1, cellSize) || IsOnLineSegment(id.xy, a2, b2, cellSize)) {
+        return float4(1, 1, 1, 1);
+    }
+        
+    return c;
+}
+
+[numthreads(8,8,1)]
+void CSMain(uint3 id : SV_DispatchThreadID) {
+    
+    uint width, height;
+    Result.GetDimensions(width, height);
+
+    float2 cellSize = float2((float) width, (float) height) / float2((float) gridWidth, (float) gridHeight);
+    float4 color = backgroundColor;
+        
+    // color = DrawGrid(id.xy, cellSize, color);
+    
+    color = DrawIfOnLineSegment(id.xy, cellSize, color, time);
+    
+    //color = DrawCircleAroundGridVertice(id.xy, cellSize, color, time);
+    
+    Result[id.xy] = color;
+}

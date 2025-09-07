@@ -1,0 +1,17 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture3D<float4> Result;
+
+int width, height;
+StructuredBuffer<float> noiseValues;
+
+[numthreads(8,8,8)]
+void CSMain (uint3 id : SV_DispatchThreadID) {
+    uint index = id.x + id.y * width + id.z * width * height;
+    float val = noiseValues[index];
+    
+    Result[id] = float4(val, val, val, 1.0);
+}

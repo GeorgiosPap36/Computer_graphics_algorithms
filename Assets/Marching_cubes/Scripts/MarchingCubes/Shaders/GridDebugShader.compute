@@ -1,0 +1,30 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Uniforms
+Texture3D<float4> Noise;
+
+struct GridPoint {
+    float3 pos;
+    float val;
+};
+
+AppendStructuredBuffer<GridPoint> gridPoints;
+
+float3 gridSize, areaSize;
+
+[numthreads(8, 8, 8)]
+void CSMain(uint3 id : SV_DispatchThreadID) {
+    
+    if (any(id > gridSize - 1)) {
+        return;
+    }
+
+    float3 cellSize = areaSize / gridSize;
+
+    GridPoint gP;
+    gP.pos = id * cellSize;
+    gP.val = Noise[id].r;
+    gridPoints.Append(gP);
+    
+}

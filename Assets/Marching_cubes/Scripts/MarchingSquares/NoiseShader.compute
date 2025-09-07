@@ -1,0 +1,64 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture3D<float4> Result;
+
+// Random value generator (pseudo hash)
+float random(float3 st) {
+    return frac(sin(dot(st, float3(12.9898, 78.233, 45.164))) * 43758.5453123);
+}
+
+// 3D Value Noise
+float ValueNoise(float3 st) {
+    float3 i = floor(st); // lattice coordinates
+    float3 f = frac(st); // fractional part
+
+    // Eight corners of the cube
+    float a = random(i);
+    float b = random(i + float3(1.0, 0.0, 0.0));
+    float c = random(i + float3(0.0, 1.0, 0.0));
+    float d = random(i + float3(1.0, 1.0, 0.0));
+    float e = random(i + float3(0.0, 0.0, 1.0));
+    float f1 = random(i + float3(1.0, 0.0, 1.0));
+    float g = random(i + float3(0.0, 1.0, 1.0));
+    float h = random(i + float3(1.0, 1.0, 1.0));
+
+    // Smoothstep interpolation (Hermite curve)
+    float3 u = f * f * (3.0 - 2.0 * f);
+
+    // Interpolate along x
+    float x00 = lerp(a, b, u.x);
+    float x10 = lerp(c, d, u.x);
+    float x01 = lerp(e, f1, u.x);
+    float x11 = lerp(g, h, u.x);
+
+    // Interpolate along y
+    float y0 = lerp(x00, x10, u.y);
+    float y1 = lerp(x01, x11, u.y);
+
+    // Interpolate along z
+    return lerp(y0, y1, u.z);
+}
+
+[numthreads(8,8,8)]
+void CSMain (uint3 id : SV_DispatchThreadID) {
+    
+    uint width, height, depth;
+    Result.GetDimensions(width, height, depth);
+    
+    // Normalize the id coordinates based 
+    // on the width and height of the texture
+    // * 2 - 1 so that (0, 0) is in the center
+    float3 uv = id.xyz / float3(width, height, depth);
+
+    // Scale the coordinate system to see
+    // some noise in action
+    float3 pos = float3(uv * 50.0);
+
+    // Use the noise function
+    float n = ValueNoise(pos);
+
+    Result[id.xyz] = float4(n, n, n, 1.0);
+}

@@ -1,0 +1,137 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+#include "MarchingCubesTables.hlsl"
+
+struct GridCell {
+    float3 p[8];
+    float val[8];
+};
+
+struct Triangle {
+    float3 p[3];
+    float3 normals[3];
+};
+
+// Uniforms
+Texture3D<float4> Noise;
+
+AppendStructuredBuffer<Triangle> triangles;
+AppendStructuredBuffer<float3> gridPoints;
+
+float3 gridSize, areaSize;
+float isoLevel;
+
+int GetCubeIndex(GridCell gC) {
+    int cubeIndex = 0;
+    if (gC.val[0] < isoLevel)
+        cubeIndex |= 1;
+    if (gC.val[1] < isoLevel)
+        cubeIndex |= 2;
+    if (gC.val[2] < isoLevel)
+        cubeIndex |= 4;
+    if (gC.val[3] < isoLevel)
+        cubeIndex |= 8;
+    if (gC.val[4] < isoLevel)
+        cubeIndex |= 16;
+    if (gC.val[5] < isoLevel)
+        cubeIndex |= 32;
+    if (gC.val[6] < isoLevel)
+        cubeIndex |= 64;
+    if (gC.val[7] < isoLevel)
+        cubeIndex |= 128;
+    
+    return cubeIndex;
+}
+
+float3 VertexInterp(float3 p0, float3 p1, float val0, float val1) {
+    float t = (isoLevel - val0) / (val1 - val0);
+    return p0 + t * (p1 - p0);
+}
+
+float3 CalculateTriangleNormal(float3 p1, float3 p2, float3 p3) {
+    float3 edge1 = p1 - p2;
+    float3 edge2 = p1 - p3;
+    
+    return cross(edge1, edge2);
+}
+
+void CreateCubeSurface(GridCell gridCell, int cubeIndex) {
+    
+    float3 vertList[12];
+    
+    if (edgeTable[cubeIndex] & 1)
+        vertList[0] = VertexInterp(gridCell.p[0], gridCell.p[1], gridCell.val[0], gridCell.val[1]);
+    if (edgeTable[cubeIndex] & 2)
+        vertList[1] = VertexInterp(gridCell.p[1], gridCell.p[2], gridCell.val[1], gridCell.val[2]);
+    if (edgeTable[cubeIndex] & 4)
+        vertList[2] = VertexInterp(gridCell.p[2], gridCell.p[3], gridCell.val[2], gridCell.val[3]);
+    if (edgeTable[cubeIndex] & 8)
+        vertList[3] = VertexInterp(gridCell.p[3], gridCell.p[0], gridCell.val[3], gridCell.val[0]);
+    if (edgeTable[cubeIndex] & 16)
+        vertList[4] = VertexInterp(gridCell.p[4], gridCell.p[5], gridCell.val[4], gridCell.val[5]);
+    if (edgeTable[cubeIndex] & 32)
+        vertList[5] = VertexInterp(gridCell.p[5], gridCell.p[6], gridCell.val[5], gridCell.val[6]);
+    if (edgeTable[cubeIndex] & 64)
+        vertList[6] = VertexInterp(gridCell.p[6], gridCell.p[7], gridCell.val[6], gridCell.val[7]);
+    if (edgeTable[cubeIndex] & 128)
+        vertList[7] = VertexInterp(gridCell.p[7], gridCell.p[4], gridCell.val[7], gridCell.val[4]);
+    if (edgeTable[cubeIndex] & 256)
+        vertList[8] = VertexInterp(gridCell.p[0], gridCell.p[4], gridCell.val[0], gridCell.val[4]);
+    if (edgeTable[cubeIndex] & 512)
+        vertList[9] = VertexInterp(gridCell.p[1], gridCell.p[5], gridCell.val[1], gridCell.val[5]);
+    if (edgeTable[cubeIndex] & 1024)
+        vertList[10] = VertexInterp(gridCell.p[2], gridCell.p[6], gridCell.val[2], gridCell.val[6]);
+    if (edgeTable[cubeIndex] & 2048)
+        vertList[11] = VertexInterp(gridCell.p[3], gridCell.p[7], gridCell.val[3], gridCell.val[7]);
+
+    Triangle tr;
+    
+    for (int i = 0; triTable[cubeIndex][i] != -1; i += 3) {
+        tr.p[0] = vertList[triTable[cubeIndex][i]];
+        tr.p[1] = vertList[triTable[cubeIndex][i + 1]];
+        tr.p[2] = vertList[triTable[cubeIndex][i + 2]];
+        
+        float3 normal = CalculateTriangleNormal(tr.p[0], tr.p[1], tr.p[2]);
+        normal = normalize(normal);
+        
+        tr.normals[0] = normal;
+        tr.normals[1] = normal;
+        tr.normals[2] = normal;
+        
+        triangles.Append(tr);   
+    }
+}
+
+[numthreads(1,1,1)]
+void CSMain(uint3 id : SV_GroupID) { 
+    
+    if (any(id > uint3(gridSize - 1))) {
+        return;
+    }
+
+    float3 cellSize = areaSize / gridSize;
+    
+    GridCell gC;
+    gC.p[0] = (id + float3(0, 0, 0)) * cellSize;
+    gC.p[1] = (id + float3(1, 0 ,0)) * cellSize;
+    gC.p[2] = (id + float3(1, 0, 1)) * cellSize;
+    gC.p[3] = (id + float3(0, 0, 1)) * cellSize;
+    gC.p[4] = (id + float3(0, 1, 0)) * cellSize;
+    gC.p[5] = (id + float3(1, 1, 0)) * cellSize;
+    gC.p[6] = (id + float3(1, 1, 1)) * cellSize;
+    gC.p[7] = (id + float3(0, 1, 1)) * cellSize;
+    
+    gC.val[0] = Noise[id + float3(0, 0, 0)].r;
+    gC.val[1] = Noise[id + float3(1, 0 ,0)].r;
+    gC.val[2] = Noise[id + float3(1, 0, 1)].r;
+    gC.val[3] = Noise[id + float3(0, 0, 1)].r;
+    gC.val[4] = Noise[id + float3(0, 1, 0)].r;
+    gC.val[5] = Noise[id + float3(1, 1, 0)].r;
+    gC.val[6] = Noise[id + float3(1, 1, 1)].r;
+    gC.val[7] = Noise[id + float3(0, 1, 1)].r;
+    
+    int cubeIndex = GetCubeIndex(gC);
+    
+   CreateCubeSurface(gC, cubeIndex);
+}
